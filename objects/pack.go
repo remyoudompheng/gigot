@@ -16,6 +16,7 @@ import (
 // Cf. Documentation/technical/pack-format.txt in Git sources for
 // reference.
 
+// A PackReader implements access to Git pack files and indexes.
 type PackReader struct {
 	version   int
 	pack, idx File
@@ -36,6 +37,8 @@ var (
 	errUnsupportedPackVersion = errors.New("gigot: packfile has unsupported format version")
 )
 
+// NewPackReader creates a PackReader from files pointing to a packfile
+// and its index.
 func NewPackReader(pack, idx File) (*PackReader, error) {
 	version, _, err := checkPackMagic(pack)
 	if err != nil {

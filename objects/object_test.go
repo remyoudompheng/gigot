@@ -5,6 +5,7 @@
 package objects
 
 import (
+	"bytes"
 	"encoding/hex"
 	"os"
 	"testing"
@@ -83,5 +84,26 @@ Hello!
 		t.Errorf("bad type %v, expected %v", t1, COMMIT)
 	case string(s1) != expect:
 		t.Errorf("bad content %q, expected %q", s1, expect)
+	}
+}
+
+func TestWriteTree(t *testing.T) {
+	expect := "tree 58\x00" +
+		"100644 a\x00" + binaryHash("e965047ad7c57865823c7d992b1d046ea66edf78") +
+		"100644 b\x00" + binaryHash("216e97ce08229b8776d3feb731c6d23a2f669ac8")
+	tree, err := parseTree([]byte(expect[8:]))
+	if err != nil {
+		t.Fatal("parse tree:", err)
+	}
+	buf := new(bytes.Buffer)
+	tree.WriteTo(buf)
+	if buf.String() != expect {
+		t.Errorf("got %q, expected %q", buf, expect)
+	}
+
+	h := NewHash([]byte(expect))
+	if h.String() != "8860cd0334e8b582ec8fe85a99dcc58ad6ee9387" {
+		t.Errorf("got hash %s, expected %s", h,
+			"8860cd0334e8b582ec8fe85a99dcc58ad6ee9387")
 	}
 }

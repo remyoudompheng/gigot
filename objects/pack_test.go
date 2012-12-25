@@ -38,6 +38,9 @@ func TestFindInPack(t *testing.T) {
 	// Take the object ID of a random ref.
 	refs, err := ioutil.ReadFile("../.git/info/refs")
 	if err != nil {
+		refs, err = ioutil.ReadFile("../.git/refs/heads/master")
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	id := bytes.Fields(refs)[0]
