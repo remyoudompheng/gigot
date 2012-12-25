@@ -6,8 +6,10 @@ package objects
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -19,27 +21,23 @@ import (
 // A PackReader implements access to Git pack files and indexes.
 type PackReader struct {
 	version   int
-	pack, idx File
+	pack, idx *io.SectionReader
 
 	// idxFanout[i] is the number of objects whose first byte
 	// is <= i.
 	idxFanout [256]uint32
 }
 
-type File interface {
-	io.ReaderAt
-	io.Closer
-}
-
 var (
 	errBadPackMagic           = errors.New("gigot: bad magic number in packfile")
 	errBadIdxMagic            = errors.New("gigot: bad magic number in index file")
 	errUnsupportedPackVersion = errors.New("gigot: packfile has unsupported format version")
+	errInvalidPackEntryType   = errors.New("gigot: invalid type for packfile entry")
 )
 
 // NewPackReader creates a PackReader from files pointing to a packfile
 // and its index.
-func NewPackReader(pack, idx File) (*PackReader, error) {
+func NewPackReader(pack, idx *io.SectionReader) (*PackReader, error) {
 	version, _, err := checkPackMagic(pack)
 	if err != nil {
 		return nil, err
@@ -52,7 +50,7 @@ func NewPackReader(pack, idx File) (*PackReader, error) {
 	return pk, err
 }
 
-func checkPackMagic(pack File) (version, count uint32, err error) {
+func checkPackMagic(pack *io.SectionReader) (version, count uint32, err error) {
 	var buf [12]byte
 	_, err = pack.ReadAt(buf[:], 0)
 	if err != nil {
@@ -72,7 +70,7 @@ func checkPackMagic(pack File) (version, count uint32, err error) {
 
 const idxHeaderSize = 4 + 4 + 256*4
 
-func (pk *PackReader) checkIdxMagic(idx File) (err error) {
+func (pk *PackReader) checkIdxMagic(idx *io.SectionReader) (err error) {
 	var buf [idxHeaderSize]byte
 	_, err = idx.ReadAt(buf[:], 0)
 	if err != nil {
@@ -90,7 +88,7 @@ func (pk *PackReader) checkIdxMagic(idx File) (err error) {
 
 var errNotFoundInPack = errors.New("object does not exist in pack")
 
-func (pk *PackReader) findObject(hash [20]byte) (offset int64, err error) {
+func (pk *PackReader) findObject(hash Hash) (offset int64, err error) {
 	min, max := int64(0), int64(pk.idxFanout[hash[0]])
 	if hash[0] > 0 {
 		min = int64(pk.idxFanout[hash[0]-1])
@@ -105,7 +103,7 @@ func (pk *PackReader) findObject(hash [20]byte) (offset int64, err error) {
 		return 0, err
 	}
 BinarySearch:
-	for max-min >= 2 {
+	for min < max {
 		var hmed [20]byte
 		med := (min + max) / 2
 		_, err = pk.idx.ReadAt(hmed[:], idxHeaderSize+med*20)
@@ -114,14 +112,17 @@ BinarySearch:
 		}
 		switch cmp := bytes.Compare(hmed[:], hash[:]); true {
 		case cmp < 0:
-			min = med
+			min = med + 1
 		case cmp > 0:
-			max = med
+			max = med - 1
 		case cmp == 0:
 			// Found.
 			min, max = med, med
 			break BinarySearch
 		}
+	}
+	if min > max {
+		return 0, errNotFoundInPack
 	}
 
 	// Read from 32-bit offset table.
@@ -144,11 +145,117 @@ BinarySearch:
 	return off64, err
 }
 
-func (pk *PackReader) Close() error {
-	err1 := pk.pack.Close()
-	err2 := pk.idx.Close()
-	if err1 != nil {
-		return err1
+const (
+	pkNone = iota
+	pkCommit
+	pkTree
+	pkBlob
+	pkTag
+	_
+	pkOfsDelta
+	pkRefDelta
+	pkAny
+	pkMax
+	pkBad = -1
+)
+
+// extract extracts the raw contents of an object.
+func (pk *PackReader) extract(h Hash) (typ int, data []byte, err error) {
+	// An object entry in a packfile has the following form:
+	// <VARINT><L bytes>
+	// The varint encodes the object type and length in the following way:
+	//   size = high<<4 | low
+	//   VARINT = high<<7 | type<<4 | low.
+	//
+	// Object types in pack are described by enum object_type in
+	// Git sources (cache.h)
+	off, err := pk.findObject(h)
+	if err != nil {
+		return
 	}
-	return err2
+	var buf [16]byte // 109-bit sizes should be enough for everybody.
+	_, err = pk.pack.ReadAt(buf[:], off)
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		err = nil
+	}
+	if err != nil {
+		return
+	}
+	varint, n := binary.Uvarint(buf[:])
+	objsize := int64((varint>>7)<<4 | (varint & 0xf))
+	objtype := int(varint>>4) & 0x7 // 3 bits.
+
+	switch objtype {
+	case pkCommit, pkTree, pkBlob, pkTag:
+		// objsize is the *uncompressed* size.
+		data := make([]byte, objsize)
+		n, err := readCompressed(pk.pack, off+int64(n), data)
+		return objtype, data[:n], err
+	case pkRefDelta:
+		// Ref delta: parent hash (20 bytes) + deflated delta (objsize bytes)
+		var parent Hash
+		_, err := pk.pack.ReadAt(parent[:], off+int64(n))
+		if err != nil {
+			return typ, data, err
+		}
+		// TODO: delta encoding.
+		data := make([]byte, objsize)
+		n, err := readCompressed(pk.pack, off+int64(n)+20, data)
+		inflated := bytes.NewBuffer(make([]byte, 0, objsize+64))
+		fmt.Fprintf(inflated, "delta from %s ", parent)
+		inflated.Write(data[:n])
+		return objtype, inflated.Bytes(), err
+	case pkOfsDelta:
+		// Offset delta: distance to parent (varint bytes) + deflated delta (objsize bytes)
+		parentOff, n2, err := readVarint(pk.pack, off+int64(n))
+		if err != nil {
+			return objtype, data, err
+		}
+		// TODO: delta encoding.
+		data := make([]byte, objsize)
+		n, err = readCompressed(pk.pack, off+int64(n+n2), data)
+		inflated := bytes.NewBuffer(make([]byte, 0, objsize+64))
+		fmt.Fprintf(inflated, "delta from offset %d ", -parentOff)
+		inflated.Write(data[:n])
+		return objtype, inflated.Bytes(), err
+	}
+	return typ, data, errInvalidPackEntryType
+}
+
+func (pk *PackReader) Objects() ([]Hash, error) {
+	count := pk.idxFanout[0xff]
+	buf := make([]byte, 20*count)
+	_, err := pk.idx.ReadAt(buf, idxHeaderSize)
+	if err != nil {
+		return nil, err
+	}
+	hashes := make([]Hash, count)
+	for i := range hashes {
+		copy(hashes[i][:], buf[20*i:20*(i+1)])
+	}
+	return hashes, nil
+}
+
+// Utility functions.
+
+func readVarint(r *io.SectionReader, offset int64) (v int64, n int, err error) {
+	var buf [16]byte // 109 bits should be enough for everybody.
+	_, err = r.ReadAt(buf[:], offset)
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		err = nil
+	}
+	if err != nil {
+		return
+	}
+	u, n := binary.Uvarint(buf[:])
+	v = int64(u)
+	return
+}
+
+func readCompressed(r *io.SectionReader, offset int64, s []byte) (int, error) {
+	zr, err := zlib.NewReader(io.NewSectionReader(r, offset, r.Size()-offset))
+	if err != nil {
+		return 0, err
+	}
+	return io.ReadFull(zr, s)
 }

@@ -7,13 +7,14 @@ package objects
 import (
 	"bytes"
 	"encoding/hex"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestFindInPack(t *testing.T) {
+func getPack(t *testing.T) *PackReader {
 	// Take a random packfile in our own repository.
 	packs, err := filepath.Glob("../.git/objects/pack/pack-*.pack")
 	if err != nil || len(packs) == 0 {
@@ -28,13 +29,26 @@ func TestFindInPack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	packstat, _ := pack.Stat()
+	packstat, err := pack.Stat()
+	if err != nil {
+		t.Fatal("stat pack", err)
+	}
+	idxstat, err := idx.Stat()
+	if err != nil {
+		t.Fatal("stat idx", err)
+	}
 	t.Logf("opening pack %s (%d bytes)", pname, packstat.Size())
-	pk, err := NewPackReader(pack, idx)
+	pk, err := NewPackReader(
+		io.NewSectionReader(pack, 0, packstat.Size()),
+		io.NewSectionReader(idx, 0, idxstat.Size()))
 	if err != nil {
 		t.Fatal(err)
 	}
+	return pk
+}
 
+func TestFindInPack(t *testing.T) {
+	pk := getPack(t)
 	// Take the object ID of a random ref.
 	refs, err := ioutil.ReadFile("../.git/info/refs")
 	if err != nil {
@@ -55,4 +69,20 @@ func TestFindInPack(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("offset=%v", off)
+}
+
+func TestDumpPack(t *testing.T) {
+	pk := getPack(t)
+	hashes, err := pk.Objects()
+	if err != nil {
+		t.Fatal("list pack", err)
+	}
+	for _, h := range hashes {
+		typ, data, err := pk.extract(h)
+		t.Logf("%s %d %+q", h, typ, data)
+		if err != nil {
+			t.Fatal("extract", h, err)
+			break
+		}
+	}
 }
