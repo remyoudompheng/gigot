@@ -9,8 +9,9 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
+
+	"github.com/remyoudompheng/gigot/gitdelta"
 )
 
 // This file implements Git's packfile format.
@@ -173,6 +174,10 @@ func (pk *PackReader) extract(h Hash) (typ int, data []byte, err error) {
 	if err != nil {
 		return
 	}
+	return pk.extractAt(off)
+}
+
+func (pk *PackReader) extractAt(off int64) (typ int, data []byte, err error) {
 	var buf [16]byte // 109-bit sizes should be enough for everybody.
 	_, err = pk.pack.ReadAt(buf[:], off)
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -198,26 +203,35 @@ func (pk *PackReader) extract(h Hash) (typ int, data []byte, err error) {
 		if err != nil {
 			return typ, data, err
 		}
-		// TODO: delta encoding.
-		data := make([]byte, objsize)
-		n, err := readCompressed(pk.pack, off+int64(n)+20, data)
-		inflated := bytes.NewBuffer(make([]byte, 0, objsize+64))
-		fmt.Fprintf(inflated, "delta from %s ", parent)
-		inflated.Write(data[:n])
-		return objtype, inflated.Bytes(), err
+		patch := make([]byte, objsize)
+		_, err = readCompressed(pk.pack, off+int64(n)+20, patch)
+		// FIXME: check that parent object is always in the same pack.
+		typ, data, err = pk.extract(parent)
+		if err != nil {
+			return typ, patch, err
+		}
+		data, err = gitdelta.Patch(data, patch)
+		if err != nil {
+			return typ, patch, err
+		}
+		return typ, data, err
 	case pkOfsDelta:
 		// Offset delta: distance to parent (varint bytes) + deflated delta (objsize bytes)
-		parentOff, n2, err := readVarint(pk.pack, off+int64(n))
+		parentOff, n2, err := readVaroffset(pk.pack, off+int64(n))
 		if err != nil {
 			return objtype, data, err
 		}
-		// TODO: delta encoding.
-		data := make([]byte, objsize)
-		n, err = readCompressed(pk.pack, off+int64(n+n2), data)
-		inflated := bytes.NewBuffer(make([]byte, 0, objsize+64))
-		fmt.Fprintf(inflated, "delta from offset %d ", -parentOff)
-		inflated.Write(data[:n])
-		return objtype, inflated.Bytes(), err
+		patch := make([]byte, objsize)
+		_, err = readCompressed(pk.pack, off+int64(n+n2), patch)
+		typ, data, err := pk.extractAt(off - parentOff)
+		if err != nil {
+			return typ, patch, err
+		}
+		data, err = gitdelta.Patch(data, patch)
+		if err != nil {
+			return typ, patch, err
+		}
+		return typ, data, err
 	}
 	return typ, data, errInvalidPackEntryType
 }
@@ -250,6 +264,33 @@ func readVarint(r *io.SectionReader, offset int64) (v int64, n int, err error) {
 	u, n := binary.Uvarint(buf[:])
 	v = int64(u)
 	return
+}
+
+// readVaroffset reads the pseudo-varint used to encode offsets for delta bases.
+// It is a big-endian form: 1|a0, ..., 1|a_{n-1}, 0|a_n.
+// representing:
+//  (a0+1)<<7*n + ... + (a_{n-1}+1)<<7 + a_n
+func readVaroffset(r *io.SectionReader, offset int64) (v int64, n int, err error) {
+	var buf [16]byte // 109 bits should be enough for everybody.
+	n, err = r.ReadAt(buf[:], offset)
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		err = nil
+	}
+	if err != nil {
+		return
+	}
+	u := uint64(0)
+	for i, b := range buf[:n] {
+		if i > 0 {
+			u++
+		}
+		u <<= 7
+		u |= uint64(b &^ 0x80)
+		if b&0x80 == 0 {
+			return int64(u), i + 1, nil
+		}
+	}
+	return int64(u), len(buf), io.ErrUnexpectedEOF
 }
 
 func readCompressed(r *io.SectionReader, offset int64, s []byte) (int, error) {

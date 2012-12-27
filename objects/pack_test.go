@@ -79,7 +79,11 @@ func TestDumpPack(t *testing.T) {
 	}
 	for _, h := range hashes {
 		typ, data, err := pk.extract(h)
-		t.Logf("%s %d %+q", h, typ, data)
+		if len(data) < 80 {
+			t.Logf("%s %d %+q", h, typ, data)
+		} else {
+			t.Logf("%s %d (%d bytes)", h, typ, len(data))
+		}
 		if err != nil {
 			t.Fatal("extract", h, err)
 			break
