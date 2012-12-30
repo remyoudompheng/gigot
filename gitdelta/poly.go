@@ -1,6 +1,10 @@
+// Copyright 2012 Rémy Oudompheng. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package gitdelta
 
-// This file implements Rabin fingerprinting, a cyclic
+// This file implements Rabin fingerprinting, a
 // code defined by an irreducible polynomial mod 2.
 
 // T and U are tables are seen in Git source code.
@@ -9,6 +13,8 @@ var _T, _U [256]uint32
 // poly is an irreducible polynomial of degree 31, b_31 ... b_0
 // representing b_31 X^31 + ... + b_1 X + b_0.
 const poly = 0xab59b4d1
+
+const degree = 31
 
 // We use a hashing window of 16 bytes.
 const _W = 16
@@ -68,4 +74,16 @@ func initTables() {
 		}
 		_U[i] = p
 	}
+}
+
+func hashRabin(s []byte) uint32 {
+	var p uint32
+	for _, b := range s {
+		// p <- (p*X^8 + b) mod poly
+		// t clears the upper bit and adds the degree >= 31
+		// part of p*X^8.
+		t := _T[byte(p>>(degree-8))]
+		p = (p << 8) ^ uint32(b) ^ t
+	}
+	return p
 }
