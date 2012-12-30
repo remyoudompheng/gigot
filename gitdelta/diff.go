@@ -75,22 +75,14 @@ func Diff(data1, data2 []byte) []byte {
 			patch = appendRefData(patch, uint32(refi), uint32(refj-refi))
 
 			// Skip bytes and update hash.
-			skipped := data2[i:]
-			if testj+_W < len(data2) {
-				skipped = data2[i : testj+_W]
-			}
-			for tmp, b := range skipped {
-				p ^= _U[data2[(i+tmp)-_W]]
-				p = (p << 8) ^ uint32(b) ^ _T[uint8(p>>(degree-8))]
-			}
+			i = testj + _W - 1
 			lastmatch = testj - 1
-			if i+len(skipped) == len(data2) {
+			if i >= len(data2) {
 				break
 			}
-			i += len(skipped)
-			b = data2[i]
+			p = hashRabin(data2[testj : testj+_W])
+			continue
 		}
-
 		// Cancel out data2[i-W] and take data2[i]
 		p ^= _U[data2[i-_W]]
 		p = (p << 8) ^ uint32(b) ^ _T[uint8(p>>(degree-8))]
