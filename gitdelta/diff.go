@@ -13,13 +13,17 @@ import (
 
 // hashChunks hashes chunks input[k*W+1 : (k+1)*W]
 // and returns a map from hashes to index in input buffer.
-func hashChunks(input []byte) map[uint32]int {
+func hashChunks(input []byte) hashmap {
 	nbHash := len(input) / _W
-	hashes := make(map[uint32]int, nbHash)
+	if nbHash >= 0x7fffffff {
+		panic("input too large")
+	}
+	var hashes hashmap
+	hashes.Init(int32(nbHash))
 	for i := (nbHash - 1) * _W; i > 0; i -= _W {
 		// on collision overwrite with smallest index.
 		h := hashRabin(input[i : i+_W])
-		hashes[h] = i
+		hashes.Set(h, i)
 	}
 	return hashes
 }
@@ -52,7 +56,7 @@ func Diff(data1, data2 []byte) []byte {
 		//	panic("p != hashRabin(data2[i-_W:i])")
 		//}
 
-		refi, ok := hashes[p]
+		refi, ok := hashes.Get(p)
 		if ok && bytes.Equal(data1[refi:refi+_W], data2[i-_W:i]) {
 			// We have a match! Try to extend it left and right.
 			testi := i - _W
@@ -162,3 +166,71 @@ func appendRefData(patch []byte, off, length uint32) []byte {
 	patch[iop] = op
 	return patch
 }
+
+// A hashmap provides similar functionality as a map[uint32]int.
+type hashmap struct {
+	Bits    uint
+	Map     []int32 // lowbits -> index in hashEntry
+	Entries []hashEntry
+}
+
+type hashEntry struct {
+	Next int32 // index in hashmap.Entries, we don't support >4GB blobs.
+	Key  uint32
+	Val  int
+}
+
+func (h *hashmap) Init(size int32) {
+	if size < 0 {
+		panic("negative size")
+	}
+	bits := uint(4)
+	for uint32(1)<<bits < uint32(size) && bits < 31 {
+		bits++
+	}
+	h.Bits = bits
+	h.Map = make([]int32, 1<<bits)
+	for i := range h.Map {
+		h.Map[i] = -1
+	}
+	h.Entries = make([]hashEntry, 0, size)
+}
+
+func (h *hashmap) Set(key uint32, val int) {
+	if len(h.Entries) == 0x7fffffff {
+		// max int32
+		panic("too many entries")
+	}
+	low := key & (1<<h.Bits - 1)
+	slot := &h.Map[low]
+	if *slot < 0 {
+		*slot = int32(len(h.Entries))
+		h.Entries = append(h.Entries, hashEntry{-1, key, val})
+		return
+	}
+	// chain entries in the same bucket.
+	old := &h.Entries[*slot]
+	if old.Key == key {
+		if old.Val > val {
+			old.Val = val
+		}
+		return
+	}
+
+	h.Entries = append(h.Entries, hashEntry{*slot, key, val})
+	*slot = int32(len(h.Entries) - 1)
+}
+
+func (h *hashmap) Get(key uint32) (val int, ok bool) {
+	low := key & (1<<h.Bits - 1)
+	slot := h.Map[low]
+	for slot >= 0 {
+		e := &h.Entries[slot]
+		if e.Key == key {
+			return e.Val, true
+		}
+		slot = e.Next
+	}
+	return -1, false
+}
+
