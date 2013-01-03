@@ -7,10 +7,12 @@ package objects
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -77,7 +79,7 @@ func TestDumpPack(t *testing.T) {
 	if err != nil {
 		t.Fatal("list pack", err)
 	}
-	for _, h := range hashes {
+	for i, h := range hashes {
 		typ, data, err := pk.extract(h)
 		if len(data) < 80 {
 			t.Logf("%s %d %+q", h, typ, data)
@@ -88,5 +90,56 @@ func TestDumpPack(t *testing.T) {
 			t.Fatal("extract", h, err)
 			break
 		}
+		if i > 20 {
+			break
+		}
 	}
+}
+
+func TestDisplayPack(t *testing.T) {
+	pk := getPack(t)
+	hashes, err := pk.Objects()
+	if err != nil {
+		t.Fatal("list pack", err)
+	}
+	for i, h := range hashes {
+		o, err := pk.Extract(h)
+		if err != nil {
+			typ, data, _ := pk.extract(h)
+			t.Logf("%d %+q", typ, data)
+			t.Fatal("Extract", h, err)
+			break
+		}
+		if rehash(o) != h {
+			t.Errorf("hash mismatch %s %s", rehash(o), h)
+		}
+		t.Log(h, o.Type())
+		t.Log(prettyPrint(o))
+		if i > 20 {
+			break
+		}
+	}
+}
+
+func prettyPrint(o Object) string {
+	switch o := o.(type) {
+	case Blob:
+		if len(o.Data) < 40 {
+			return strconv.Quote(string(o.Data))
+		}
+		return strconv.Quote(string(o.Data[:40])) + "..."
+	case Tree:
+		buf := new(bytes.Buffer)
+		for _, e := range o.Entries {
+			fmt.Fprintf(buf, "%06o %s %s\n",
+				gitMode(e.Mode), e.Hash, e.Name)
+		}
+		return buf.String()
+	case Commit:
+		buf := new(bytes.Buffer)
+		o.WriteTo(buf)
+		buf.ReadBytes(0)
+		return buf.String()
+	}
+	panic("impossible")
 }

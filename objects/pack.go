@@ -160,6 +160,23 @@ const (
 	pkBad = -1
 )
 
+func (pk *PackReader) Extract(h Hash) (Object, error) {
+	typ, data, err := pk.extract(h)
+	if err != nil {
+		return nil, err
+	}
+	switch typ {
+	case pkCommit:
+		return readObject(COMMIT, data)
+	case pkTree:
+		return readObject(TREE, data)
+	case pkBlob:
+		return readObject(BLOB, data)
+	}
+	println(typ)
+	panic("invalid pack object type")
+}
+
 // extract extracts the raw contents of an object.
 func (pk *PackReader) extract(h Hash) (typ int, data []byte, err error) {
 	// An object entry in a packfile has the following form:

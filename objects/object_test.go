@@ -107,3 +107,19 @@ func TestWriteTree(t *testing.T) {
 			"8860cd0334e8b582ec8fe85a99dcc58ad6ee9387")
 	}
 }
+
+func TestParseAuthor(t *testing.T) {
+	const exampleLine = "Junio C Hamano <gitster@pobox.com> 1187591163 -0700"
+	name, when, err := parseAuthor([]byte(exampleLine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "Junio C Hamano <gitster@pobox.com>" {
+		t.Errorf("got %q, want %q", name, "Junio C Hamano <gitster@pobox.com>")
+	}
+	got := when.Format("2006-01-02 15:04:05 -0700")
+	expected := "2007-08-19 23:26:03 -0700"
+	if got != expected {
+		t.Errorf("got %q, want %q", got, expected)
+	}
+}
