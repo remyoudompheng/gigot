@@ -169,21 +169,16 @@ func (t Tree) Type() ObjType { return TREE }
 func (t Tree) WriteTo(w io.Writer) error {
 	// The format of a tree object is:
 	// (OctalMode " " Name "\x00" Hash)*
-	length := 0
-	for _, e := range t.Entries {
-		length += (6 + 1 + 1 + 20) + len(e.Name)
+	buf := new(bytes.Buffer)
+	for _, entry := range t.Entries {
+		fmt.Fprintf(buf, "%o %s\x00%s", gitMode(entry.Mode), entry.Name, entry.Hash[:])
 	}
-	_, err := fmt.Fprintf(w, "tree %d\x00", length)
+	_, err := fmt.Fprintf(w, "tree %d\x00", buf.Len())
 	if err != nil {
 		return err
 	}
-	for _, entry := range t.Entries {
-		_, err = fmt.Fprintf(w, "%06o %s\x00%s", gitMode(entry.Mode), entry.Name, entry.Hash[:])
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err = w.Write(buf.Bytes())
+	return err
 }
 
 // A Git mode is (type<<12|unixperm).
@@ -235,8 +230,7 @@ func parseTree(s []byte) (t Tree, err error) {
 		sp := bytes.IndexByte(s, ' ')
 		nul := bytes.IndexByte(s, '\x00')
 		switch {
-		case sp != 6, nul < sp, nul+20 >= len(s):
-			println(sp, nul, len(s))
+		case nul < sp, nul+20 >= len(s):
 			err = errBadTreeData
 			return
 		}
