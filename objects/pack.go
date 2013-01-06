@@ -160,6 +160,7 @@ const (
 	pkBad = -1
 )
 
+// Extract finds and parses an object from a pack.
 func (pk *PackReader) Extract(h Hash) (Object, error) {
 	typ, data, err := pk.extract(h)
 	if err != nil {
@@ -253,6 +254,7 @@ func (pk *PackReader) extractAt(off int64) (typ int, data []byte, err error) {
 	return typ, data, errInvalidPackEntryType
 }
 
+// Objects returns the list of hashes of objects stored in this pack.
 func (pk *PackReader) Objects() ([]Hash, error) {
 	count := pk.idxFanout[0xff]
 	buf := make([]byte, 20*count)

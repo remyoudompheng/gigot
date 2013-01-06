@@ -3,6 +3,11 @@
 // license that can be found in the LICENSE file.
 
 // package objects deals with Git object format.
+//
+// It implements low-level accessors to read and parse
+// loose objects and packfiles in Git repositories, and
+// defines appropriate data types representing the three
+// basic object types of Git: blobs, trees and commits.
 package objects
 
 import (
@@ -19,6 +24,7 @@ import (
 	"time"
 )
 
+// ObjType enumerates the three possible object types: blob, tree, commit.
 type ObjType uint8
 
 const (
@@ -133,6 +139,8 @@ func readObject(t ObjType, data []byte) (Object, error) {
 	panic(errInvalidType(t.String()))
 }
 
+// ParseLoose reads a loose object as stored in the objects/
+// subdirectory of a git repository.
 func ParseLoose(r io.ReadCloser) (Object, error) {
 	t, data, err := readLoose(r)
 	if err != nil {
@@ -142,8 +150,14 @@ func ParseLoose(r io.ReadCloser) (Object, error) {
 }
 
 type Object interface {
+	// ID return the hash of the object.
 	ID() Hash
+	// Type returns the object type (BLOB, TREE, COMMIT).
 	Type() ObjType
+	// WriteTo serializes the object: if the Writer is a sha1 Hash
+	// this will produce the hash for this object, if the Writer is
+	// a compressor from compress/flate, this is equivalent to the
+	// loose object format.
 	WriteTo(io.Writer) error
 }
 
@@ -282,15 +296,16 @@ func parseTree(s []byte) (t Tree, err error) {
 	return t, nil
 }
 
+// A Commit represents the metadata stored in a Git commit.
 type Commit struct {
 	Hash          Hash
-	Tree          Hash
-	Parents       []Hash
-	Author        string
+	Tree          Hash   // The tree object pointed to by this commit.
+	Parents       []Hash // The parents of this commit.
+	Author        string // The email address of the commit author.
 	AuthorTime    time.Time
-	Committer     string
+	Committer     string // The email address of the committer.
 	CommitterTime time.Time
-	Message       []byte
+	Message       []byte // The commit description.
 }
 
 func (c Commit) ID() Hash      { return c.Hash }

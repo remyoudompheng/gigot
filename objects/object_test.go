@@ -123,3 +123,23 @@ func TestParseAuthor(t *testing.T) {
 		t.Errorf("got %q, want %q", got, expected)
 	}
 }
+
+func ExampleParseLoose() {
+	f, err := os.Open(".git/objects/4b/b670aefc9ea81bede6b019b11d0c5d2f1871c2")
+	if err != nil {
+		return
+	}
+	// ParseLoose closes f.
+	obj, err := ParseLoose(f)
+	if err != nil {
+		return
+	}
+	switch obj.(type) {
+	case Commit:
+		// object is a commit.
+	case Blob:
+		// object is a blob.
+	case Tree:
+		// object is a tree.
+	}
+}

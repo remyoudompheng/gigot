@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -142,4 +143,37 @@ func prettyPrint(o Object) string {
 		return buf.String()
 	}
 	panic("impossible")
+}
+
+func ExamplePackReader_Extract() {
+	base := ".git/objects/pack/pack-bb4afc76654154e3a9f198723ba89873ecb14293"
+	fpack, err := os.Open(base + ".pack")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fidx, err := os.Open(base + ".idx")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer fpack.Close()
+	defer fidx.Close()
+
+	packsize, err1 := fpack.Seek(0, os.SEEK_END)
+	idxsize, err2 := fidx.Seek(0, os.SEEK_END)
+	if err1 != nil || err2 != nil {
+		log.Fatal(err1, err2)
+	}
+	pk, err := NewPackReader(
+		io.NewSectionReader(fpack, 0, packsize),
+		io.NewSectionReader(fidx, 0, idxsize))
+	if err != nil {
+		log.Fatal(err)
+	}
+	var hash Hash
+	hex.Decode(hash[:], []byte("2e16bbf779131a90346eab585e9e5c4736d3aeac"))
+	obj, err := pk.Extract(hash)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("%+v", obj)
 }
