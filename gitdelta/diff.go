@@ -138,11 +138,11 @@ func appendRefData(patch []byte, off, length uint32) []byte {
 		patch = append(patch, b)
 	}
 	if b := byte(off >> 16); b != 0 {
-		op |= 2
+		op |= 4
 		patch = append(patch, b)
 	}
 	if b := byte(off >> 24); b != 0 {
-		op |= 2
+		op |= 8
 		patch = append(patch, b)
 	}
 

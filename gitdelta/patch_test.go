@@ -118,6 +118,21 @@ func benchmarkDiff(b *testing.B, size int) {
 	b.Logf("input: %d, %d bytes, patch: %d bytes", len(s1), len(s2), n)
 }
 
+func benchmarkPatch(b *testing.B, size int) {
+	s1, s2 := genData(size)
+	p := Diff(s1, s2)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Patch(s1, p)
+	}
+	b.SetBytes(int64(len(s1) + len(s2)))
+	b.Logf("input: %d bytes, patch: %d bytes, out: %d bytes", len(s1), len(p), len(s2))
+}
+
 func BenchmarkDiffSmall(b *testing.B)  { benchmarkDiff(b, 4<<10) }
 func BenchmarkDiffMedium(b *testing.B) { benchmarkDiff(b, 64<<10) }
 func BenchmarkDiffLarge(b *testing.B)  { benchmarkDiff(b, 8<<20) }
+
+func BenchmarkPatchSmall(b *testing.B)  { benchmarkPatch(b, 4<<10) }
+func BenchmarkPatchMedium(b *testing.B) { benchmarkPatch(b, 64<<10) }
+func BenchmarkPatchLarge(b *testing.B)  { benchmarkPatch(b, 8<<20) }
