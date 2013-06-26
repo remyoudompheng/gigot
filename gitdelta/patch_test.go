@@ -71,7 +71,6 @@ func genData(size int) (s1, s2 []byte) {
 				a, b = b, a%b
 			}
 		}
-		panic("impossible")
 	}
 
 	s1 = make([]byte, 0, size)

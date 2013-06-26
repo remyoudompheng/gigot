@@ -211,7 +211,7 @@ func (pk *PackReader) extractAt(off int64) (typ int, data []byte, err error) {
 	switch objtype {
 	case pkCommit, pkTree, pkBlob, pkTag:
 		// objsize is the *uncompressed* size.
-		data := make([]byte, objsize)
+		data = make([]byte, objsize)
 		n, err := readCompressed(pk.pack, off+int64(n), data)
 		return objtype, data[:n], err
 	case pkRefDelta:
@@ -241,7 +241,7 @@ func (pk *PackReader) extractAt(off int64) (typ int, data []byte, err error) {
 		}
 		patch := make([]byte, objsize)
 		_, err = readCompressed(pk.pack, off+int64(n+n2), patch)
-		typ, data, err := pk.extractAt(off - parentOff)
+		typ, data, err = pk.extractAt(off - parentOff)
 		if err != nil {
 			return typ, patch, err
 		}

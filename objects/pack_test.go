@@ -20,8 +20,11 @@ import (
 func getPack(t *testing.T) *PackReader {
 	// Take a random packfile in our own repository.
 	packs, err := filepath.Glob("../.git/objects/pack/pack-*.pack")
-	if err != nil || len(packs) == 0 {
-		t.Fatalf("globbing failed: %v", err, packs)
+	switch {
+	case err != nil:
+		t.Fatalf("globbing failed: %v", err)
+	case len(packs) == 0:
+		t.Fatalf("no packs found at ../.git/objects/pack/pack-*.pack")
 	}
 	pname := packs[0]
 	pack, err := os.Open(pname)
@@ -62,7 +65,7 @@ func TestFindInPack(t *testing.T) {
 	}
 	id := bytes.Fields(refs)[0]
 	if len(id) != 40 {
-		t.Fatal("invalid commit ID %q in info/refs", id)
+		t.Fatalf("invalid commit ID %q in info/refs", id)
 	}
 	var refhash [20]byte
 	hex.Decode(refhash[:], id)
